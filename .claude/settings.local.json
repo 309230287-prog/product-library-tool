@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/weis/.claude/**)",
+      "Bash(cat \"C:/Users/weis/.claude/CLAUDE.md\" 2>/dev/null | head -100)",
+      "Bash(cat \"C:/Users/weis/.claude/settings.local.json\" 2>/dev/null)",
+      "Bash(python)"
+    ]
+  }
+}
