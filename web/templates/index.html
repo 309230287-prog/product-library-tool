@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>商品库工具 v2.0</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Microsoft YaHei',sans-serif;background:#f0f2f5}
+.bar{background:#1a73e8;color:#fff;padding:0 20px;height:50px;display:flex;align-items:center;gap:16px}
+.bar h1{font-size:16px}.bar .tabs{display:flex;gap:0}
+.bar .tabs button{background:none;border:none;color:rgba(255,255,255,.7);font-size:14px;cursor:pointer;padding:4px 12px;border-bottom:2px solid transparent}
+.bar .tabs button.on{color:#fff;border-bottom-color:#fff}
+.bar .spc{flex:1}
+.bar .gear{background:none;border:1px solid rgba(255,255,255,.3);color:#fff;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px}
+.wrap{max-width:1000px;margin:20px auto;padding:0 16px}
+.pg{display:none}.pg.show{display:block}
+.steps{display:flex;gap:12px;margin-bottom:16px}
+.steps .s{flex:1;background:#fff;border-radius:8px;padding:16px;text-align:center;border:2px solid #e0e0e0}
+.steps .s .n{width:24px;height:24px;border-radius:50%;background:#e0e0e0;color:#666;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;margin-bottom:6px}
+.steps .s.go .n{background:#1a73e8;color:#fff}
+.steps .s.ok .n{background:#1e8e3e;color:#fff}.steps .s.ok{border-color:#1e8e3e}
+.steps .s h3{font-size:14px}.steps .s p{font-size:11px;color:#888;margin-top:2px}
+.up{border:2px dashed #ccc;border-radius:8px;padding:20px;text-align:center;background:#fff;cursor:pointer;margin-bottom:12px}
+.up:hover{border-color:#1a73e8;background:#f5f8ff}
+.up.lock{opacity:.35;pointer-events:none;background:#fafafa}
+.up .ic{font-size:32px}.up .tt{font-size:14px;font-weight:600}.up .hi{font-size:11px;color:#999;margin-top:2px}
+.prg{display:none;margin:10px 0}.prg .tx{font-size:12px;color:#666;margin-bottom:3px}
+.prg .ba{height:6px;background:#e0e0e0;border-radius:3px;overflow:hidden}
+.prg .ba .fl{height:100%;background:#1a73e8;border-radius:3px;width:0}
+.inf{display:none;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:12px}
+.inf.ok{background:#e6f4ea;color:#1e8e3e;display:block}
+.st{display:none;gap:12px;margin:12px 0}.st .c{flex:1;background:#fff;border-radius:8px;padding:14px;text-align:center}
+.st .c .nu{font-size:24px;font-weight:700}.st .c .lb{font-size:11px;color:#888;margin-top:2px}
+.acts{display:flex;gap:8px;margin:12px 0;align-items:center}
+.acts button{padding:7px 14px;border-radius:5px;font-size:12px;cursor:pointer;font-weight:600;border:none}
+.acts button:disabled{opacity:.35;cursor:not-allowed}
+.btn-go{background:#1e8e3e;color:#fff}.btn-out{background:#fff;border:1px solid #ccc}.btn-reset{background:#eee;color:#333}
+.btn-f{padding:5px 12px;border:1px solid #ccc;background:#fff;border-radius:5px;font-size:12px;cursor:pointer}
+.btn-f.on{background:#1a73e8;color:#fff;border-color:#1a73e8}
+.tb-scroll{max-height:380px;overflow-y:auto;border-radius:8px}
+.tb-wrap{background:#fff;display:none}
+.tb-wrap table{width:100%;border-collapse:collapse;font-size:12px}
+.tb-wrap th{background:#f5f5f5;padding:8px 10px;text-align:left;font-weight:600;border-bottom:2px solid #e0e0e0;position:sticky;top:0}
+.tb-wrap td{padding:6px 10px;border-bottom:1px solid #eee}
+.tb-wrap tr:hover{background:#f8f8f8}
+.tag{display:inline-block;padding:1px 6px;border-radius:10px;font-size:11px;font-weight:600}
+.tag.g{background:#e6f4ea;color:#1e8e3e}.tag.r{background:#fce8e6;color:#d93025}.tag.y{background:#fef7e0;color:#e37400}
+.modal{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.4);z-index:100;align-items:center;justify-content:center}
+.modal.show{display:flex}
+.modal .card{background:#fff;border-radius:10px;padding:28px;width:400px;box-shadow:0 6px 24px rgba(0,0,0,.2)}
+.modal h2{font-size:18px;margin-bottom:16px}
+.modal label{display:block;font-size:12px;color:#555;margin:10px 0 3px}
+.modal input{width:100%;padding:8px 10px;border:1px solid #ddd;border-radius:5px;font-size:13px}
+.modal .mod-btns{margin-top:16px;display:flex;gap:8px}
+.modal .mod-btns button{padding:8px 16px;border:none;border-radius:5px;font-size:13px;cursor:pointer;flex:1}
+.tt-wrap{color:#1a73e8;cursor:pointer;text-decoration:underline;position:relative}
+.tt-wrap .tp{display:none;position:absolute;top:50%;left:calc(100% + 8px);transform:translateY(-50%);background:#fff;color:#333;padding:8px 12px;border-radius:6px;font-size:11px;white-space:nowrap;z-index:999;line-height:1.7;box-shadow:0 3px 12px rgba(0,0,0,.15);border:1px solid #e0e0e0}
+.tt-wrap:hover .tp{display:block}
+</style>
+</head>
+<body>
+
+<div class="bar">
+  <h1>商品库工具 v2.0</h1>
+  <div class="tabs">
+    <button class="on">清洗去重</button>
+    <button>新品查重</button>
+  </div>
+  <span class="spc"></span>
+  <button class="gear">设置</button>
+</div>
+
+<div class="modal" id="modal">
+  <div class="card">
+    <h2>设置</h2>
+    <label>API 地址</label><input id="apiUrl" value="https://api.deepseek.com/v1/chat/completions">
+    <label>API Key</label><input type="password" id="apiKey" placeholder="sk-xxxx">
+    <label>模型</label><input id="modelName" value="deepseek-chat">
+    <div class="mod-btns">
+      <button style="background:#1a73e8;color:#fff" id="btnSave">保存</button>
+      <button id="btnTest" style="background:#e37400;color:#fff">测试连接</button>
+      <button>取消</button>
+    </div>
+    <div id="testResult" style="margin-top:10px;font-size:12px;display:none"></div>
+  </div>
+</div>
+
+<div id="logPanel" style="position:fixed;bottom:0;left:0;right:0;max-height:200px;overflow-y:auto;background:#1a1a2e;color:#0f0;font-family:monospace;font-size:11px;padding:8px 12px;z-index:9999;border-top:2px solid #333"></div>
+
+<div class="wrap">
+
+<!-- ====== 模块A：清洗去重 ====== -->
+<div class="pg show" id="pgA">
+  <div class="steps">
+    <div class="s go" id="sa1"><div class="n">1</div><h3>上传商品库</h3><p>选择商品库Excel</p></div>
+    <div class="s" id="sa2"><div class="n">2</div><h3>自动清洗</h3><p>语义翻译+去重规则</p></div>
+    <div class="s" id="sa3"><div class="n">3</div><h3>导出结果</h3><p>含重复标注的清洗结果</p></div>
+  </div>
+
+  <div class="up" id="upA">
+    <div class="ic">+</div><div class="tt">上传商品库 Excel</div><div class="hi">如 商品库整理.xlsx，12440条原始数据</div>
+    <input type="file" hidden accept=".xlsx">
+  </div>
+
+  <div class="prg" id="progA">
+    <div class="tx">清洗中... <span id="pADone">0</span>/<span id="pATotal">0</span></div>
+    <div class="ba"><div class="fl" id="pAFill"></div></div>
+  </div>
+
+  <div class="inf" id="infoA"></div>
+
+  <div class="st" id="statsA">
+    <div class="c"><div class="nu" id="nTotal">0</div><div class="lb">总条数</div></div>
+    <div class="c"><div class="nu" id="nDup" style="color:#d93025">0</div><div class="lb">发现重复</div></div>
+    <div class="c"><div class="nu" id="nNormal" style="color:#1e8e3e">0</div><div class="lb">正常</div></div>
+    <div class="c"><div class="nu" id="nMissing" style="color:#e37400">0</div><div class="lb">缺省值</div></div>
+  </div>
+
+  <div class="acts">
+    <button class="btn-go" id="btnExportA">导出</button>
+    <button class="btn-reset" id="btnResetA">重置</button>
+  </div>
+
+  <div class="tb-scroll"><div class="tb-wrap" id="twA">
+    <table><thead><tr><th>SPUID</th><th>名称</th><th>单位</th><th>描述</th><th>异常分类</th><th>组号</th><th>建议</th></tr></thead><tbody id="tbA"></tbody></table>
+  </div></div>
+</div>
+
+<!-- ====== 模块B：新品查重 ====== -->
+<div class="pg" id="pgB">
+  <div class="steps">
+    <div class="s go" id="sb1"><div class="n">1</div><h3>上传商品库</h3><p>建索引</p></div>
+    <div class="s" id="sb2"><div class="n">2</div><h3>上传接龙表</h3><p>新品查重</p></div>
+    <div class="s" id="sb3"><div class="n">3</div><h3>导出</h3><p>含编码的结果</p></div>
+  </div>
+
+  <div class="up" id="upB1">
+    <div class="ic">+</div><div class="tt">上传商品库 Excel</div><div class="hi">模块A清洗结果或商品库整理_结果.xlsx</div>
+    <input type="file" hidden accept=".xlsx">
+  </div>
+
+  <div class="prg" id="progB">
+    <div class="tx">建索引中... <span id="pBDone">0</span>/<span id="pBTotal">0</span></div>
+    <div class="ba"><div class="fl" id="pBFill"></div></div>
+  </div>
+
+  <div class="inf" id="infoB"></div>
+
+  <div class="up lock" id="upB2">
+    <div class="ic">X</div><div class="tt">请先上传商品库建立索引</div><div class="hi">完成 Step1 后自动激活</div>
+  </div>
+
+  <div class="st" id="statsB">
+    <div class="c"><div class="nu" id="nbt">0</div><div class="lb">总计</div></div>
+    <div class="c"><div class="nu" id="nbr" style="color:#1e8e3e">0</div><div class="lb">建议复用</div></div>
+    <div class="c"><div class="nu" id="nbn" style="color:#d93025">0</div><div class="lb">需新增</div></div>
+  </div>
+
+  <div class="acts">
+    <button class="btn-go" id="bStart" disabled>开始</button>
+    <button class="btn-out" id="bPause" disabled>暂停</button>
+    <button class="btn-out" id="bStop" disabled>停止</button>
+    <button class="btn-reset" id="bReset">重置</button>
+    <span class="spc"></span>
+    <button class="btn-go" id="bExport">导出</button>
+  </div>
+
+  <div class="prg" id="progB2">
+    <div class="tx">查重中... <span id="pb2d">0</span>/<span id="pb2t">0</span></div>
+    <div class="ba"><div class="fl" id="pb2f"></div></div>
+  </div>
+
+  <div style="display:flex;gap:6px;margin-bottom:6px">
+    <button class="btn-f on">全部</button>
+    <button class="btn-f">建议复用</button>
+    <button class="btn-f">需新增</button>
+  </div>
+
+  <div class="tb-scroll"><div class="tb-wrap" id="twB">
+    <table><thead><tr><th>#</th><th>商品名称</th><th>单位</th><th>结果</th><th>建议编码</th><th>匹配逻辑说明</th></tr></thead><tbody id="tbB"></tbody></table>
+  </div></div>
+</div>
+
+</div><!-- /wrap -->
+
+<script>
+// ===== 日志抓取 =====
+(function(){
+  var p = document.getElementById('logPanel');
+  function log(msg, color){
+    var t = new Date().toLocaleTimeString();
+    p.innerHTML += '<div style="color:'+(color||'#0f0')+'">['+t+'] '+msg+'</div>';
+    p.scrollTop = p.scrollHeight;
+  }
+  window.onerror = function(msg, url, line, col, err){
+    log('ERROR: '+msg+' (line '+line+':'+col+')', '#f44');
+    return false;
+  };
+  window.addEventListener('unhandledrejection', function(e){
+    log('PROMISE ERROR: '+e.reason, '#f44');
+  });
+  var origError = console.error;
+  console.error = function(){
+    log('console.error: '+Array.prototype.join.call(arguments,' '), '#f88');
+    origError.apply(console, arguments);
+  };
+  window._log = log;
+  log('日志系统就绪', '#ff0');
+})();
+</script>
+
+<script>
+// ===== 工具函数 =====
+function $(id){return document.getElementById(id)}
+function setStep(e,s){e.classList.remove('go','ok');if(s)e.classList.add(s)}
+
+// ===== 标签切换 =====
+var tabs = document.querySelectorAll('.bar .tabs button');
+tabs[0].onclick = function(){
+  tabs[0].classList.add('on'); tabs[1].classList.remove('on');
+  $('pgA').classList.add('show'); $('pgB').classList.remove('show');
+  _log('切换到: 清洗去重', '#0ff');
+};
+tabs[1].onclick = function(){
+  tabs[1].classList.add('on'); tabs[0].classList.remove('on');
+  $('pgB').classList.add('show'); $('pgA').classList.remove('show');
+  _log('切换到: 新品查重', '#0ff');
+};
+
+// ===== 设置弹窗 =====
+document.querySelector('.gear').onclick = function(){ $('modal').classList.add('show'); };
+$('modal').querySelectorAll('button')[2].onclick = function(){ $('modal').classList.remove('show'); };
+$('btnSave').onclick = function(){
+  var key = document.getElementById('apiKey').value;
+  var url = document.getElementById('apiUrl').value;
+  var model = document.getElementById('modelName').value;
+  fetch('/api/settings', {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({api_key:key, api_url:url, model:model})}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok) _log('设置已保存', '#0f0'); else _log('设置保存失败', '#f44');
+  });
+  $('modal').classList.remove('show');
+};
+$('btnTest').onclick = function(){
+  var key = document.getElementById('apiKey').value;
+  var url = document.getElementById('apiUrl').value;
+  var res = document.getElementById('testResult');
+  res.style.display = 'block'; res.style.color = '#e37400'; res.textContent = '测试中...';
+  fetch('/api/test-connection', {method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({api_key:key, api_url:url})}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){ res.style.color = '#1e8e3e'; res.textContent = '连接成功'; }
+    else { res.style.color = '#d93025'; res.textContent = '连接失败: '+d.error; }
+  });
+};
+
+// ===== 模块A：清洗去重 =====
+$('upA').onclick = function(){ $('upA').querySelector('input').click(); };
+$('upA').querySelector('input').onchange = function(){ runA(); };
+
+function runA(){
+  _log('runA 开始清洗', '#0ff');
+  setStep($('sa1'), 'ok'); setStep($('sa2'), 'go');
+  $('upA').style.display = 'none'; $('progA').style.display = 'block';
+  var file = $('upA').querySelector('input').files[0];
+  var fd = new FormData(); fd.append('file', file);
+  fetch('/api/clean', {method:'POST', body:fd}).then(function(r){return r.json()}).then(function(d){
+    if(d.error){ _log('ERROR: '+d.error, '#f44'); return; }
+    _log('清洗已提交, 开始轮询进度', '#0ff');
+    var timer = setInterval(function(){
+      fetch('/api/clean-progress').then(function(r){return r.json()}).then(function(p){
+        $('pADone').textContent = p.done; $('pATotal').textContent = p.total;
+        $('pAFill').style.width = (p.total ? p.done/p.total*100 : 0)+'%';
+        var rv = p.review || {done:0, total:0};
+        if(rv.total > 0){
+          $('infoA').style.display = 'block';
+          $('infoA').textContent = 'DeepSeek复核中... '+rv.done+'/'+rv.total+' 组';
+          $('infoA').classList.add('ok');
+        }
+        if(!p.running){ clearInterval(timer); finA(); }
+      });
+    }, 500);
+  });
+}
+
+function finA(){
+  _log('finA 清洗完成, 获取结果', '#0f0');
+  fetch('/api/clean-results').then(function(r){return r.json()}).then(function(d){
+    var results = d.results;
+    var dupes = 0, normal = 0, missing = 0;
+    for(var i = 0; i < results.length; i++){
+      var ac = results[i].anomaly_class || '正常';
+      if(ac === '完全重复' || ac === '抄码名重复') dupes++;
+      else if(ac === '缺省值') missing++;
+      else normal++;
+    }
+    $('nTotal').textContent = results.length; $('nDup').textContent = dupes;
+    $('nNormal').textContent = normal; $('nMissing').textContent = missing;
+    $('statsA').style.display = 'flex';
+    $('infoA').textContent = '完成: '+results.length+'条, 发现重复'+dupes+'条, 正常'+normal+'条';
+    $('infoA').classList.add('ok');
+    renderTableA(results);
+    setStep($('sa2'), 'ok'); setStep($('sa3'), 'go');
+    _log('模块A完成: 共'+results.length+'条, 重复'+dupes+'条, 正常'+normal+'条, 缺省'+missing+'条', '#0f0');
+  });
+}
+
+function renderTableA(data){
+  var h = '';
+  for(var i = 0; i < data.length; i++){
+    var r = data[i], ac = r.anomaly_class || '正常';
+    var c = ac === '完全重复' ? 'r' : ac === '抄码名重复' ? 'y' : ac === '缺省值' ? 'y' : 'g';
+    h += '<tr><td>'+r.spuid+'</td><td>'+r.name+'</td><td>'+r.unit+'</td><td>'+r.desc+'</td>';
+    h += '<td><span class="tag '+c+'">'+ac+'</span></td>';
+    h += '<td>'+(r.group_id||'')+'</td><td>'+(r.suggestion||'')+'</td></tr>';
+  }
+  $('tbA').innerHTML = h; $('twA').style.display = 'block';
+}
+
+function resetA(){
+  setStep($('sa1'), 'go'); setStep($('sa2'), ''); setStep($('sa3'), '');
+  $('upA').style.display = 'block'; $('progA').style.display = 'none';
+  $('infoA').classList.remove('ok'); $('infoA').textContent = '';
+  $('statsA').style.display = 'none'; $('twA').style.display = 'none'; $('tbA').innerHTML = '';
+  _log('模块A 已重置', '#ff0');
+}
+
+$('btnResetA').onclick = function(){ resetA(); };
+$('btnExportA').onclick = function(){
+  _log('模块A 导出清洗结果', '#0ff');
+  window.open('/api/clean-export');
+};
+
+// ===== 模块B：新品查重 =====
+var B_timer = null, B_paused = false, B_fil = 'all', B_total = 0;
+
+// Step1: 上传商品库建索引
+$('upB1').onclick = function(){ $('upB1').querySelector('input').click(); };
+$('upB1').querySelector('input').onchange = function(){ runIdx(); };
+
+function runIdx(){
+  _log('runIdx 开始建索引', '#0ff');
+  setStep($('sb1'), 'ok'); setStep($('sb2'), 'go');
+  $('upB1').style.display = 'none'; $('progB').style.display = 'block';
+  var file = $('upB1').querySelector('input').files[0];
+  var fd = new FormData(); fd.append('file', file);
+  fetch('/api/build-index', {method:'POST', body:fd}).then(function(r){return r.json()}).then(function(d){
+    if(d.error){ _log('ERROR: '+d.error, '#f44'); return; }
+    _log('建索引已提交, 开始轮询进度', '#0ff');
+    var timer = setInterval(function(){
+      fetch('/api/build-progress').then(function(r){return r.json()}).then(function(p){
+        $('pBDone').textContent = p.done; $('pBTotal').textContent = p.total;
+        $('pBFill').style.width = (p.total ? p.done/p.total*100 : 0)+'%';
+        if(!p.running){ clearInterval(timer); finIdx(p.done); }
+      });
+    }, 500);
+  });
+}
+
+function finIdx(done){
+  _log('finIdx 索引就绪: '+done+' 条', '#0f0');
+  $('progB').style.display = 'none';
+  $('infoB').textContent = '索引就绪: '+done+' 条';
+  $('infoB').classList.add('ok');
+  var u = $('upB2'); u.classList.remove('lock');
+  u.innerHTML = '<div class="ic">+</div><div class="tt" id="b2t">上传新品接龙表</div><div class="hi">点击或拖拽 .xlsx</div><input type="file" hidden accept=".xlsx">';
+  u.onclick = function(){ u.querySelector('input').click(); };
+  u.querySelector('input').onchange = function(){ selectFileB2(); };
+  _log('Step2 已激活', '#0f0');
+}
+
+function selectFileB2(){
+  var file = $('upB2').querySelector('input').files[0];
+  if(!file) return;
+  _log('selectFileB2: '+file.name, '#0ff');
+  $('b2t').textContent = '已选择: '+file.name;
+  $('upB2').querySelector('.ic').textContent = 'V';
+  var fd = new FormData(); fd.append('file', file);
+  fetch('/api/upload', {method:'POST', body:fd}).then(function(r){return r.json()}).then(function(d){
+    if(d.error){ _log('ERROR: '+d.error, '#f44'); return; }
+    B_total = d.total;
+    $('bStart').disabled = false;
+    _log('接龙表已上传, 共'+d.total+'条, 开始按钮已启用', '#0f0');
+  });
+}
+
+// 按钮绑定
+$('bStart').onclick = function(){ runB(); };
+$('bPause').onclick = function(){ toggleP(); };
+$('bStop').onclick = function(){ stopB(); };
+$('bReset').onclick = function(){ resetB(); };
+$('bExport').onclick = function(){ window.open('/api/export'); };
+
+// 筛选按钮
+var filBtns = document.querySelectorAll('#pgB .btn-f');
+filBtns[0].onclick = function(){ filB('all', filBtns[0]); };
+filBtns[1].onclick = function(){ filB('建议复用', filBtns[1]); };
+filBtns[2].onclick = function(){ filB('需新增', filBtns[2]); };
+
+function runB(){
+  _log('runB 开始查重', '#0ff');
+  setStep($('sb2'), 'ok'); setStep($('sb3'), 'go');
+  $('upB2').style.display = 'none';
+  $('statsB').style.display = 'flex'; $('progB2').style.display = 'block';
+  $('pb2t').textContent = B_total; $('twB').style.display = 'block'; $('tbB').innerHTML = '';
+  $('bStart').disabled = true; $('bPause').disabled = false; $('bStop').disabled = false;
+  B_paused = false; B_fil = 'all';
+  // 重置筛选按钮
+  var bs = document.querySelectorAll('#pgB .btn-f');
+  for(var i = 0; i < bs.length; i++) bs[i].classList.remove('on');
+  if(bs[0]) bs[0].classList.add('on');
+  fetch('/api/start', {method:'POST'}).then(function(r){return r.json()}).then(function(d){
+    if(d.error){ _log('ERROR: '+d.error, '#f44'); return; }
+    _log('查重已启动, 共'+d.total+'条', '#0ff');
+    B_timer = setInterval(step, 500);
+  });
+}
+
+function step(){
+  if(B_paused) return;
+  fetch('/api/progress').then(function(r){return r.json()}).then(function(p){
+    $('pb2d').textContent = p.done;
+    $('pb2f').style.width = (p.total ? p.done/p.total*100 : 0)+'%';
+    fetch('/api/results').then(function(r){return r.json()}).then(function(d){
+      var all = d.results;
+      var filtered = B_fil === 'all' ? all : all.filter(function(x){return x.result === B_fil});
+      renderB(filtered);
+      $('nbt').textContent = all.length;
+      $('nbr').textContent = all.filter(function(x){return x.result === '建议复用'}).length;
+      $('nbn').textContent = all.filter(function(x){return x.result === '需新增'}).length;
+      if(!p.running){ clearInterval(B_timer); B_timer = null; finB(); }
+    });
+  });
+}
+
+function renderB(data){
+  var h = '';
+  for(var i = 0; i < data.length; i++){
+    var r = data[i];
+    var cls = r.result === '建议复用' ? 'g' : r.result === '需新增' ? 'r' : 'y';
+    var label = r.result || '待确认';
+    var cc = '';
+    if(r.spuid){
+      cc = '<span class="tt-wrap">'+r.spuid+'<span class="tp">编码:'+r.spuid+'<br>名称:'+r.name+'<br>单位:'+r.unit+'<br>分类:'+(r.cat||'')+'<br>品牌:'+(r.brand||'')+'<br>规格:'+(r.spec||'')+'</span></span>';
+    }
+    h += '<tr><td>'+r.row+'</td><td>'+r.name+'</td><td>'+r.unit+'</td><td><span class="tag '+cls+'">'+label+'</span></td><td>'+cc+'</td><td>'+r.detail+'</td></tr>';
+  }
+  $('tbB').innerHTML = h;
+}
+
+function finB(){
+  _log('finB 查重完成', '#0f0');
+  $('bStart').disabled = false; $('bPause').disabled = true; $('bStop').disabled = true;
+  setStep($('sb3'), 'ok');
+}
+
+function toggleP(){
+  B_paused = !B_paused;
+  $('bPause').textContent = B_paused ? '继续' : '暂停';
+  _log('toggleP '+(B_paused?'暂停':'继续'), '#ff0');
+}
+
+function stopB(){
+  _log('stopB 停止查重', '#f80');
+  if(B_timer){ clearInterval(B_timer); B_timer = null; }
+  fetch('/api/stop', {method:'POST'});
+  finB();
+}
+
+function filB(type, btn){
+  _log('filB 筛选: '+type, '#0ff');
+  B_fil = type;
+  var bs = document.querySelectorAll('#pgB .btn-f');
+  for(var i = 0; i < bs.length; i++) bs[i].classList.remove('on');
+  btn.classList.add('on');
+  fetch('/api/results').then(function(r){return r.json()}).then(function(d){
+    var filtered = type === 'all' ? d.results : d.results.filter(function(x){return x.result === type});
+    renderB(filtered);
+  });
+}
+
+function resetB(){
+  _log('resetB 模块B重置', '#ff0');
+  if(B_timer){ clearInterval(B_timer); B_timer = null; }
+  setStep($('sb1'), 'go'); setStep($('sb2'), ''); setStep($('sb3'), '');
+  $('upB1').style.display = 'block'; $('progB').style.display = 'none';
+  $('infoB').classList.remove('ok'); $('infoB').textContent = '';
+  $('statsB').style.display = 'none'; $('progB2').style.display = 'none'; $('twB').style.display = 'none';
+  var u = $('upB2'); u.classList.add('lock');
+  u.innerHTML = '<div class="ic">X</div><div class="tt">请先上传商品库建立索引</div><div class="hi">完成 Step1 后自动激活</div>';
+  u.onclick = null;
+  $('bStart').disabled = true; $('bPause').disabled = true; $('bStop').disabled = true;
+  $('tbB').innerHTML = '';
+  B_total = 0; B_fil = 'all';
+  var bs = document.querySelectorAll('#pgB .btn-f');
+  for(var i = 0; i < bs.length; i++) bs[i].classList.remove('on');
+  if(bs[0]) bs[0].classList.add('on');
+}
+</script>
+</body>
+</html>

@@ -19,18 +19,65 @@ TRAILING_JUNK = re.compile(r'[【】\[\]]+$')
 # ============================================================
 # 状态词
 # ============================================================
-STATUS_WORDS = {'杀好', '鲜', '活', '冻', '冻品', '冰鲜', '速冻', '散装', '散称'}
+STATUS_WORDS = {'杀好', '鲜', '活', '冻', '冻品', '冰鲜', '速冻', '散装', '散称', '干'}
+SIZE_IN_PAREN = {'大', '小', '中', '中号', '中虾', '大条', '小黄瓜'}
 
 
 def _normalize_spec(raw: str) -> str:
-    """规格标准化：×→*、去1*前缀"""
+    """规格标准化：×→*、去1*前缀、去*1尾缀、去/单位尾缀"""
     s = raw.replace('×', '*').replace('x', '*').replace('X', '*')
     s = re.sub(r'^1\*', '', s).strip()
+    s = re.sub(r'\*1$', '', s).strip()
+    s = re.sub(r'/[^\s]+$', '', s).strip()
     return s
 
 
+UNIT_SYNONYMS = {'箱': ['件'], '件': ['箱'], '包': ['袋'], '袋': ['包']}
+
+
+def units_equivalent(a: str, b: str) -> bool:
+    if a == b:
+        return True
+    return b in UNIT_SYNONYMS.get(a, [])
+
+
+def _parse_weight(spec: str):
+    """从规格提取重量克数，无法解析返回None"""
+    m = re.search(r'(\d+\.?\d*)\s*(斤)', spec)
+    if m:
+        return float(m.group(1)) * 500
+    m = re.search(r'(\d+\.?\d*)\s*(kg|公斤)', spec)
+    if m:
+        return float(m.group(1)) * 1000
+    m = re.search(r'(\d+\.?\d*)\s*g(?!\s*[a-z])', spec, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    return None
+
+
+def weights_equivalent(a: str, b: str) -> bool:
+    wa = _parse_weight(a)
+    wb = _parse_weight(b)
+    if wa is not None and wb is not None:
+        return abs(wa - wb) < 0.01
+    return False
+
+
 # 加工动作前缀——只检测动词，不硬编码结果词
-PROC_PREFIXES = ['切', '去', '单冻', '速冻', '剁', '绞', '斩', '削', '剥', '刮']
+def _load_proc_prefixes():
+    try:
+        import openpyxl, os
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '配置.xlsx')
+        wb = openpyxl.load_workbook(path, data_only=True)
+        ws = wb['加工前缀'] if '加工前缀' in wb.sheetnames else wb.active
+        prefixes = [str(ws.cell(r, 1).value or '').strip() for r in range(2, ws.max_row + 1)]
+        prefixes = [p for p in prefixes if p]
+        wb.close()
+        return prefixes if prefixes else ['切', '去', '单冻', '速冻', '剁', '绞', '斩', '削', '剥', '刮']
+    except Exception:
+        return ['切', '去', '单冻', '速冻', '剁', '绞', '斩', '削', '剥', '刮']
+
+PROC_PREFIXES = _load_proc_prefixes()
 
 
 def has_processing_intent(remark: str) -> bool:
@@ -372,10 +419,16 @@ class SemanticTranslator:
         name, paren_content = self._extract_paren(name)
         paren_status = None
         from_paren = False
-        if paren_content and paren_content in STATUS_WORDS:
-            paren_status = paren_content
-            statuses.append(paren_content)
-            from_paren = True
+        if paren_content:
+            if paren_content in STATUS_WORDS:
+                paren_status = paren_content
+                statuses.append(paren_content)
+                from_paren = True
+                paren_content = None  # 状态词→消解为has_status
+            elif paren_content in SIZE_IN_PAREN:
+                pass  # 尺寸词→保留在paren_content，影响比对
+            else:
+                paren_content = None  # 公/母/包装等→丢弃
 
         core = re.sub(r'\s+', '', name).strip()
         if not core:
@@ -431,21 +484,32 @@ class SemanticTranslator:
             return True
         return b in COMPATIBLE_CATEGORIES.get(a, []) or a in COMPATIBLE_CATEGORIES.get(b, [])
 
-def is_status_redundant(status: Optional[str], category: str) -> bool:
-    if not status:
+    @staticmethod
+    @staticmethod
+    def is_status_redundant(status: Optional[str], category: str) -> bool:
+        if not status:
+            return False
+        # 加工/包装状态词：始终兼容（杀好/冻品/速冻/散装/散称/干/冻）
+        if status in ('杀好', '冻品', '速冻', '散装', '散称', '干', '冻'):
+            return True
+        # 品类冗余状态词：对应品类下兼容
+        if status == '鲜' and category in ('鲜肉类', '鲜肉类（通用）'):
+            return True
+        if status == '冰鲜' and category in ('水产类', '水产类（通用）', '水产品'):
+            return True
         return False
-    if status == '鲜' and category in ('鲜肉类', '鲜肉类（通用）'):
-        return True
-    if status == '干' and category in ('干调类', '干调类（通用）'):
-        return True
-    if status == '冰鲜' and category in ('水产类', '水产类（通用）', '水产品'):
-        return True
-    return False
 
     @staticmethod
     def descs_equivalent(a: DescMeaning, b: DescMeaning) -> bool:
         if not a.has_spec and not b.has_spec:
             return True
         if a.has_spec and b.has_spec and not a.is_pure_text and not b.is_pure_text:
-            return a.spec_core == b.spec_core
+            if a.spec_core == b.spec_core:
+                return True
+            if weights_equivalent(a.spec_core, b.spec_core):
+                return True
         return False
+
+
+# 模块级别名，兼容外部 import
+is_status_redundant = SemanticTranslator.is_status_redundant

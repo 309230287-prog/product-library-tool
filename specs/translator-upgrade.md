@@ -69,6 +69,22 @@ def resolve_spec(name_meaning, desc_meaning, has_processing: bool) -> SpecResult
 - 输入：raw_name, raw_brand (新品取*品牌列), raw_spec (新品取*规格列), unit, category, remark
 - 输出：TranslatedItem + SpecResult
 
+## 单位异名表
+
+```python
+UNIT_SYNONYMS = {'箱': ['件'], '件': ['箱'], '包': ['袋'], '袋': ['包']}
+```
+
+比对时：单位相同或互为异名 → 通过。
+
+## 度量衡转换
+
+提取规格中的重量数值，统一转为克后比对。仅双方都是重量时才用数值比对，否则退化为字符串比对。
+
+## 规格去尾标准化
+
+在现有去头`1*`基础上新增：`*1`结尾剥离、`/单位`结尾剥离。`10kg*1`→`10kg`，`20斤/箱`→`20斤`。
+
 ## 品牌来源区分
 
 - 新品：品牌直接从 `*品牌` 列取（`"无要求"` = None），不从名称提取

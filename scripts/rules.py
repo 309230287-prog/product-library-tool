@@ -6,6 +6,7 @@ from collections import defaultdict
 from translator import (
     SemanticTranslator, ProductRow,
     SYNONYM_MAP, is_status_redundant,
+    UNIT_SYNONYMS, STATUS_WORDS,
 )
 
 
@@ -14,8 +15,6 @@ CAT_WANQUAN = '完全重复'
 CAT_CHAOMA = '抄码名重复'
 CAT_YIMING = '异名同物'
 CAT_NORMAL = '正常'
-
-STATUS_WORDS = {'杀好', '鲜', '活', '冻', '冻品', '冰鲜', '速冻', '散装', '散称'}
 
 
 def _paren_compatible(a, b):
@@ -44,13 +43,15 @@ class RuleEngine:
         self.conflicts_spec = []
 
     def _build_index(self):
-        """构建索引 — 仅含未标记行"""
+        """构建索引 — 仅含未标记行，单位异名也建索引"""
         active = [r for r in self.rows if r.anomaly_class is None]
         self.idx_nu = defaultdict(list)        # (core, unit) → rows
         self.idx_by_name = defaultdict(list)   # core → rows (for yiming)
         for r in active:
             self.idx_nu[(r.name_meaning.core, r.unit)].append(r)
             self.idx_by_name[r.name_meaning.core].append(r)
+            for syn_unit in UNIT_SYNONYMS.get(r.unit, []):
+                self.idx_nu[(r.name_meaning.core, syn_unit)].append(r)
 
     def _mark(self, row, cat, gid, desc, sug) -> bool:
         """标记一行，返回True=成功标记，False=已被标记过"""
@@ -119,6 +120,10 @@ class RuleEngine:
                         # 括号内容不同且非状态差异 → 不同商品
                         if not _paren_compatible(a.name_meaning, b.name_meaning):
                             continue
+                        # 双方都有name_spec且不同 → 不同商品
+                        if a.name_meaning.name_spec and b.name_meaning.name_spec \
+                           and a.name_meaning.name_spec != b.name_meaning.name_spec:
+                            continue
                         # 一方有抄码一方无 → 留给run_chaoma处理
                         if a.name_meaning.has_chaoma != b.name_meaning.has_chaoma:
                             continue
@@ -151,9 +156,16 @@ class RuleEngine:
             targets = [m for m in matches if m.spuid != r.spuid
                        and m.anomaly_class is None
                        and not m.name_meaning.has_chaoma
-                       and self.tr.are_categories_compatible(r.category, m.category)]
-            # 括号内容不同的过滤掉
-            targets = [t for t in targets if _paren_compatible(r.name_meaning, t.name_meaning)]
+                       and self.tr.are_categories_compatible(r.category, m.category)
+                       and self._status_compatible(r, m)]
+            # 品牌+paren+name_spec+描述过滤
+            targets = [t for t in targets
+                       if _paren_compatible(r.name_meaning, t.name_meaning)
+                       and (not r.name_meaning.brand and not t.name_meaning.brand
+                            or r.name_meaning.brand == t.name_meaning.brand)
+                       and not (r.name_meaning.name_spec and t.name_meaning.name_spec
+                                and r.name_meaning.name_spec != t.name_meaning.name_spec)
+                       and self.tr.descs_equivalent(r.desc_meaning, t.desc_meaning)]
             if not targets:
                 continue
             same_cat = [t for t in targets if t.category == r.category]
@@ -201,6 +213,16 @@ class RuleEngine:
                         # 括号内容不同且非状态差异 → 不同商品
                         if not _paren_compatible(a.name_meaning, b.name_meaning):
                             continue
+                        # 双方都有name_spec且不同 → 不同商品
+                        if a.name_meaning.name_spec and b.name_meaning.name_spec \
+                           and a.name_meaning.name_spec != b.name_meaning.name_spec:
+                            continue
+                        # 状态兼容性
+                        if not self._status_compatible(a, b):
+                            continue
+                        # 描述等价
+                        if not self.tr.descs_equivalent(a.desc_meaning, b.desc_meaning):
+                            continue
                         self.gid_counters['重'] += 1
                         gid = f"重{self.gid_counters['重']}"
                         if self._mark(a, CAT_WANQUAN, gid,
@@ -234,7 +256,14 @@ class RuleEngine:
                             continue
                         if not self.tr.are_categories_compatible(ra.category, rb.category):
                             continue
-                        if ra.name_meaning.has_status != rb.name_meaning.has_status:
+                        if not self._status_compatible(ra, rb):
+                            continue
+                        if not _paren_compatible(ra.name_meaning, rb.name_meaning):
+                            continue
+                        if not self.tr.descs_equivalent(ra.desc_meaning, rb.desc_meaning):
+                            continue
+                        if ra.name_meaning.name_spec and rb.name_meaning.name_spec \
+                           and ra.name_meaning.name_spec != rb.name_meaning.name_spec:
                             continue
                         used.add(pair)
                         self.gid_counters['异'] += 1

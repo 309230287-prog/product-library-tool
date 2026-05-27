@@ -9,8 +9,10 @@ from typing import Optional
 from translator import (
     SemanticTranslator, TranslatedItem, SpecResult,
     resolve_spec, has_processing_intent,
-    SYNONYM_MAP, STATUS_WORDS, COMPATIBLE_CATEGORIES, is_status_redundant,
+    SYNONYM_MAP, COMPATIBLE_CATEGORIES, is_status_redundant,
+    units_equivalent, weights_equivalent,
 )
+from judge import judge
 
 
 @dataclass
@@ -19,6 +21,7 @@ class IndexedRow:
     spec_core: Optional[str]; has_processing: bool
     unit: str; raw_name: str; category: str
     has_chaoma: bool; has_status: Optional[str]
+    spec_conflict: bool = False  # 名称和描述规格冲突
     hit_count: int = 0
 
 
@@ -55,15 +58,6 @@ def load_index(path: str) -> dict:
     return result
 
 
-def _paren_compatible(new_paren, cand_status):
-    if new_paren == cand_status:
-        return True
-    diff = set()
-    if new_paren: diff.add(new_paren)
-    if cand_status: diff.add(cand_status)
-    return all(w in STATUS_WORDS for w in diff)
-
-
 def _is_synonym(a, b):
     return (a in SYNONYM_MAP and b in SYNONYM_MAP[a]) or (b in SYNONYM_MAP and a in SYNONYM_MAP[b])
 
@@ -75,7 +69,7 @@ def check_spec(new_spec: SpecResult, candidate: IndexedRow) -> tuple:
     if not nc.spec_core and not candidate.spec_core and not nc.has_processing and not candidate.has_processing:
         return True, "均无规格"
     if nc.spec_core and candidate.spec_core:
-        if nc.spec_core == candidate.spec_core:
+        if nc.spec_core == candidate.spec_core or weights_equivalent(nc.spec_core, candidate.spec_core):
             if nc.has_processing == candidate.has_processing:
                 return True, "规格一致"
             return False, "spec_processing_mismatch"
@@ -107,15 +101,19 @@ def check_dimensions(new: TranslatedItem, new_spec: SpecResult,
 
     # 维度2: 品牌
     if new.brand == '__SKIP__':
-        brand_ok = True  # 用户标注"无要求"，不比对品牌
+        brand_ok = True  # 用户标注"无要求"
+    elif new.brand:
+        brand_ok = new.brand in candidate.raw_name  # 接龙表品牌→名称包含判断
+    elif candidate.brand:
+        brand_ok = candidate.brand in new.raw_name if hasattr(new, 'raw_name') else False
     else:
-        brand_ok = (not new.brand and not candidate.brand) or (new.brand == candidate.brand)
+        brand_ok = True  # 双方都无品牌
 
     # 维度3: 规格
     spec_ok, spec_detail = check_spec(new_spec, candidate)
 
-    # 维度4: 单位
-    unit_ok = new.unit == candidate.unit
+    # 维度4: 单位（含异名）
+    unit_ok = units_equivalent(new.unit, candidate.unit)
 
     # 状态兼容：一方有状态一方无→检查是否冗余
     if name_ok and new.has_status != candidate.has_status:
@@ -128,19 +126,15 @@ def check_dimensions(new: TranslatedItem, new_spec: SpecResult,
             if not is_status_redundant(candidate.has_status, candidate.category):
                 name_ok = False
 
-    # 括号内容兼容
-    if name_ok:
-        name_ok = _paren_compatible(new.paren_content, candidate.has_status)
-
-    # 分类兼容：至少一方无分类，或分类相同/互通
-    cat_ok = True
-    if new.category and candidate.category:
+    # 分类兼容：双方都是标准分类→查表；任一方非标→跳过
+    all_cats = set(COMPATIBLE_CATEGORIES.keys()) | {v for vs in COMPATIBLE_CATEGORIES.values() for v in vs}
+    if new.category and candidate.category \
+       and new.category in all_cats and candidate.category in all_cats:
         cat_ok = new.category == candidate.category or \
                  candidate.category in COMPATIBLE_CATEGORIES.get(new.category, []) or \
                  new.category in COMPATIBLE_CATEGORIES.get(candidate.category, [])
-    # 分类不兼容时，单位维度也视为不通过（核心语义：不同分类就是不同商品）
-    if not cat_ok:
-        unit_ok = False
+        if not cat_ok:
+            unit_ok = False
 
     return CandidateMatch(
         spuid=candidate.spuid, raw_name=candidate.raw_name,
@@ -198,32 +192,37 @@ def check_one(translator: SemanticTranslator, name: str, brand: Optional[str],
     # 翻译新品
     nm = translator.translate_name(name, category)
     dm = translator.translate_desc(spec_desc, unit)
-    has_proc = has_processing_intent(remark)
-    new_spec = resolve_spec(nm, dm, has_proc)
-
-    new_item = TranslatedItem(
-        core=nm.core,
-        brand=brand if brand == '__SKIP__' else (brand or nm.brand),
-        has_status=nm.has_status, paren_content=nm.paren_content,
-        unit=unit, category=category)
 
     # 查候选
     candidates = list(index.get(nm.core, []))
     if nm.core in SYNONYM_MAP:
         for syn in SYNONYM_MAP[nm.core]:
             candidates.extend(index.get(syn, []))
-    # 子串预过滤（最小长度限制，避免"菜"匹配几百条）
     for core, rows in index.items():
         shorter, longer = sorted([nm.core, core], key=len)
         if shorter and len(shorter) >= 2 and shorter in longer:
             candidates.extend(rows)
 
-    # 去重
+    # 去重，保留最多10个候选
     seen = set()
     unique = []
     for c in candidates:
         if c.spuid not in seen:
             seen.add(c.spuid); unique.append(c)
+    unique = unique[:10]
 
-    results = [check_dimensions(new_item, new_spec, remark, c) for c in unique]
-    return classify(new_item, results)
+    # 格式化 → DeepSeek 判断
+    new_dict = {
+        "name": name, "brand": brand if brand != '__SKIP__' else "",
+        "unit": unit, "spec": spec_desc, "category": category, "remark": remark,
+    }
+    cand_dicts = [{"spuid": c.spuid, "name": c.raw_name, "unit": c.unit,
+                   "spec": c.spec_core or "", "category": c.category,
+                   "brand": c.brand or ""} for c in unique]
+
+    result = judge(new_dict, cand_dicts)
+    return MatchResult(
+        result=result["result"],
+        suggested_spuid=result["suggested_spuid"],
+        detail=result["detail"],
+    )

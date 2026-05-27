@@ -40,6 +40,7 @@ def run():
             idx_row = {
                 "spuid": spuid, "core": nm.core,
                 "brand": nm.brand, "spec_core": spec.spec_core,
+                "spec_conflict": spec.conflict,
                 "has_processing": spec.has_processing,
                 "unit": unit, "raw_name": raw_name, "category": category,
                 "has_chaoma": nm.has_chaoma, "has_status": nm.has_status,
