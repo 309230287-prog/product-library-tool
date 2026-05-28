@@ -1,7 +1,6 @@
-data/*.xlsx
-*.xlsx
-!_settings.json
+data/
 __pycache__/
 build/
 dist/
 *.pyc
+_settings.json
