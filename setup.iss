@@ -1,15 +1,15 @@
 [Setup]
 AppId={{B8F2A3D1-6E5C-4A7B-9C1D-2F8E3A5B7D9F}
 AppName=商品库工具
-AppVersion=2.0
+AppVersion=2.1
 AppPublisher=商品库整理项目
 DefaultDirName={autopf}\商品库工具
 DefaultGroupName=商品库工具
 OutputDir=dist
-OutputBaseFilename=商品库工具_v2.0_安装包
+OutputBaseFilename=商品库工具_v2.1_安装包
 Compression=lzma2
 SolidCompression=yes
-UninstallDisplayName=商品库工具 v2.0
+UninstallDisplayName=商品库工具 v2.1
 WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesInstallIn64BitMode=x64compatible

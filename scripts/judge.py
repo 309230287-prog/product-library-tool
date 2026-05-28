@@ -6,6 +6,13 @@ import os, re, requests
 API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 API_URL = "https://api.deepseek.com/v1/chat/completions"
 
+_session = requests.Session()
+_session.trust_env = False
+
+
+def _post(**kwargs):
+    return _session.post(API_URL, **kwargs)
+
 
 def judge(new_item: dict, candidates: list[dict]) -> dict:
     """判断新品能否复用库里编码
@@ -43,7 +50,7 @@ def judge(new_item: dict, candidates: list[dict]) -> dict:
     prompt = "\n".join(lines)
 
     try:
-        resp = requests.post(API_URL,
+        resp = _post(
             headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
             json={"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
                   "max_tokens": 100, "temperature": 0},
@@ -143,7 +150,7 @@ def review_batch(groups: list[dict], model: str = "deepseek-chat") -> list[tuple
 
     for attempt in range(2):
         try:
-            resp = requests.post(API_URL,
+            resp = _post(
                 headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
                 json={"model": model,
                       "messages": [{"role": "user", "content": prompt}],

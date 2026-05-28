@@ -38,7 +38,28 @@ task_state = {
     "build_progress": {"done": 0, "total": 0, "running": False},
     "index": None,
     "review_progress": {"done": 0, "total": 0},
+    "order_data": None,
 }
+
+
+def find_order_columns(headers: list):
+    """扫描表头行，返回 (spuid_col, customer_col) 1-based，未找到返回 None"""
+    spuid_kw = ['spuid', 'spu编码', '商品编码', 'code', '商品代码']
+    customer_kw = ['客户', '商户名', '食堂名称', '客户名称', 'customer', '购货单位']
+    spuid_col = customer_col = None
+    for c, h in enumerate(headers, 1):
+        val = str(h or '').strip().lower()
+        if spuid_col is None:
+            for kw in spuid_kw:
+                if kw in val:
+                    spuid_col = c; break
+        if customer_col is None:
+            for kw in customer_kw:
+                if kw in val:
+                    customer_col = c; break
+        if spuid_col and customer_col:
+            break
+    return spuid_col, customer_col
 
 
 @app.route('/')
@@ -57,7 +78,9 @@ def test_connection():
     if not api_key:
         return jsonify({'ok': False, 'error': '未提供 API Key'})
     try:
-        resp = requests.post(api_url,
+        s = requests.Session()
+        s.trust_env = False
+        resp = s.post(api_url,
             headers={'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'},
             json={'model': model, 'messages': [{'role': 'user', 'content': 'hi'}], 'max_tokens': 5},
             timeout=10)
@@ -371,14 +394,38 @@ def clean_export():
     if not task_state['clean_results']:
         return jsonify({'error': '无清洗结果可导出'}), 400
     import openpyxl
+    results = task_state['clean_results']
+    od = task_state.get('order_data')
+    if od:
+        for r in results:
+            data = od.get(r['spuid'], {})
+            r['order_count'] = data.get('count', '') if data.get('count', 0) > 0 else ''
+            r['order_customers'] = '\n'.join(data.get('customers', []))
+
+    sheet1 = [r for r in results if r['anomaly_class'] in ('完全重复', '异名同物')]
+    sheet2 = [r for r in results if r['anomaly_class'] == '正常' and r.get('order_count', '') != '']
+    sheet3 = [r for r in results if r['anomaly_class'] == '抄码名重复']
+
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = '工作表1'
-    ws.append(['SPUID', '名称', '单位', '描述', '异常分类', '组号', '组说明', '建议'])
-    for row in task_state['clean_results']:
-        ws.append([row['spuid'], row['name'], row['unit'], row['desc'],
-                   row['anomaly_class'], row['group_id'], row['group_desc'],
-                   row['suggestion']])
+    headers = ['SPUID', 'SPU名称（可修改）', 'SPU基本单位', 'SPU描述（可修改）',
+               '一级分类名称', '组号', '组说明', '建议', '异常分类',
+               '是否下架/保留', '替代编码', '订单命中次数', '订单命中客户']
+
+    for sheet_name, rows in [('Sheet1', sheet1), ('Sheet2', sheet2), ('Sheet3', sheet3)]:
+        if sheet_name == 'Sheet1':
+            ws = wb.active
+            ws.title = sheet_name
+        else:
+            ws = wb.create_sheet(sheet_name)
+        ws.append(headers)
+        for r in rows:
+            ws.append([
+                r['spuid'], r['name'], r['unit'], r['desc'], r['category'],
+                r['group_id'], r['group_desc'], r['suggestion'], r['anomaly_class'],
+                r.get('keep_or_remove', ''), r.get('replace_spuid', ''),
+                r.get('order_count', ''), r.get('order_customers', ''),
+            ])
+
     output = io.BytesIO()
     wb.save(output)
     output.seek(0)
@@ -386,11 +433,117 @@ def clean_export():
                      as_attachment=True, download_name='清洗结果.xlsx')
 
 
+def apply_keep_remove(clean_results, order_data):
+    """对重复组按订单命中次数判定保留/下架（只负责 keep_or_remove + replace_spuid）"""
+    for r in clean_results:
+        r['keep_or_remove'] = ''
+        r['replace_spuid'] = ''
+    if not order_data:
+        return
+    from collections import defaultdict
+    groups = defaultdict(list)
+    review_classes = {'完全重复', '抄码名重复', '异名同物'}
+    for r in clean_results:
+        if r['group_id'] and r['anomaly_class'] in review_classes:
+            groups[r['group_id']].append(r)
+    for gid, items in groups.items():
+        if len(items) < 2:
+            continue
+        best = max(items, key=lambda x: order_data.get(x['spuid'], {}).get('count', 0))
+        best_count = order_data.get(best['spuid'], {}).get('count', 0)
+        if best_count == 0:
+            continue
+        tied = [r for r in items if order_data.get(r['spuid'], {}).get('count', 0) == best_count]
+        if len(tied) > 1:
+            continue
+        for r in items:
+            if r == best:
+                r['keep_or_remove'] = '保留'
+                other = [x for x in items if x != best][0]
+                r['replace_spuid'] = other['spuid']
+            else:
+                r['keep_or_remove'] = '下架'
+                r['replace_spuid'] = best['spuid']
+
+
+@app.route('/api/upload-orders', methods=['POST'])
+def upload_orders():
+    print("[API] /api/upload-orders")
+    file = request.files.get('file')
+    if not file or not file.filename.endswith('.xlsx'):
+        return jsonify({'error': '请上传 .xlsx 文件'}), 400
+    try:
+        print("[upload] 正在读取文件（流式）...")
+        wb = openpyxl.load_workbook(file, read_only=True)
+        ws = wb.active
+    except Exception as e:
+        print(f"[upload] 读取失败: {e}")
+        return jsonify({'error': '无法读取文件'}), 400
+
+    # 先读表头行找列位置
+    row_iter = ws.iter_rows(values_only=True)
+    headers = next(row_iter, [])
+    header_list = [str(h or '').strip() for h in headers] if headers else []
+    print(f"[upload] 表头: {len(header_list)}列")
+
+    spuid_col, customer_col = find_order_columns(header_list)
+    print(f"[upload] 列识别: SPUID列={spuid_col}, 客户列={customer_col}")
+    if not spuid_col:
+        wb.close()
+        return jsonify({'error': '未找到SPUID列'}), 400
+
+    # 前5行抽样打印 debug
+    sample_count = 0
+    order_data = {}
+    total_rows = 0
+    for row in row_iter:
+        total_rows += 1
+        # SPUID 列（1-based 转 0-based index）
+        spuid_val = row[spuid_col - 1] if len(row) >= spuid_col else None
+        if sample_count < 5:
+            print(f"[upload] sample row{total_rows}: col{spuid_col}=[{repr(spuid_val)}], col{customer_col or '-'}=[{repr(row[customer_col-1] if customer_col and len(row) >= customer_col else None)}]")
+            sample_count += 1
+        if spuid_val is None:
+            continue
+        spuid = str(spuid_val).strip()
+        if not spuid or spuid == 'None' or spuid == '0':
+            continue
+        if spuid not in order_data:
+            order_data[spuid] = {'count': 0, 'customers': []}
+        order_data[spuid]['count'] += 1
+        if customer_col:
+            cust_val = row[customer_col - 1] if len(row) >= customer_col else None
+            if cust_val is not None:
+                cust = str(cust_val).strip()
+                if cust and cust not in order_data[spuid]['customers']:
+                    order_data[spuid]['customers'].append(cust)
+
+    wb.close()
+
+    print(f"[upload] 统计完成: {len(order_data)}个唯一编码, 共{total_rows}行")
+    task_state['order_data'] = order_data
+    print("[upload] 开始保留/下架判定...")
+    apply_keep_remove(task_state['clean_results'], order_data)
+    print("[upload] 判定完成")
+    unique = len(order_data)
+    matched = sum(1 for r in task_state['clean_results'] if r.get('keep_or_remove', '') != '')
+    print(f"[upload] 返回: total_rows={total_rows}, unique={unique}, matched={matched}")
+    return jsonify({'ok': True, 'total_rows': total_rows,
+                    'unique_spuids': unique, 'matched_existing': matched})
+
+
 @app.route('/api/clean-results')
 def clean_results():
     print("[API] /api/clean-results")
+    od = task_state.get('order_data')
+    if od:
+        for r in task_state['clean_results']:
+            data = od.get(r['spuid'], {})
+            r['order_count'] = data.get('count', '') if data.get('count', 0) > 0 else ''
+            r['order_customers'] = '\n'.join(data.get('customers', []))
     return jsonify({'results': task_state['clean_results'],
-                    'total': len(task_state['clean_results'])})
+                    'total': len(task_state['clean_results']),
+                    'has_order_data': od is not None})
 
 
 @app.route('/api/build-index', methods=['POST'])

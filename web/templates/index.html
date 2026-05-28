@@ -124,6 +124,13 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#f0f2f5}
   <div class="tb-scroll"><div class="tb-wrap" id="twA">
     <table><thead><tr><th>SPUID</th><th>名称</th><th>单位</th><th>描述</th><th>异常分类</th><th>组号</th><th>建议</th></tr></thead><tbody id="tbA"></tbody></table>
   </div></div>
+
+  <div class="up" id="upOrders" style="display:none">
+    <div class="ic">+</div>
+    <div class="tt">上传销售订单（可选）</div>
+    <div class="hi">用于统计编码引用次数、客户名称，辅助保留/下架决策</div>
+    <input type="file" hidden accept=".xlsx">
+  </div>
 </div>
 
 <!-- ====== 模块B：新品查重 ====== -->
@@ -298,19 +305,35 @@ function finA(){
     $('infoA').textContent = '完成: '+results.length+'条, 发现重复'+dupes+'条, 正常'+normal+'条';
     $('infoA').classList.add('ok');
     renderTableA(results);
+    $('upOrders').style.display = 'block';
     setStep($('sa2'), 'ok'); setStep($('sa3'), 'go');
     _log('模块A完成: 共'+results.length+'条, 重复'+dupes+'条, 正常'+normal+'条, 缺省'+missing+'条', '#0f0');
   });
 }
 
 function renderTableA(data){
-  var h = '';
+  var hasOrders = false;
+  for(var i = 0; i < data.length; i++){
+    var oc = data[i].order_count;
+    if(oc !== undefined && oc !== '' && oc !== 0){ hasOrders = true; break; }
+  }
+  var h = '<tr><th>SPUID</th><th>名称</th><th>单位</th><th>描述</th><th>异常分类</th><th>组号</th><th>建议</th>';
+  if(hasOrders) h += '<th>是否下架/保留</th><th>替代编码</th><th>订单命中次数</th><th>订单命中客户</th>';
+  h += '</tr>';
   for(var i = 0; i < data.length; i++){
     var r = data[i], ac = r.anomaly_class || '正常';
     var c = ac === '完全重复' ? 'r' : ac === '抄码名重复' ? 'y' : ac === '缺省值' ? 'y' : 'g';
     h += '<tr><td>'+r.spuid+'</td><td>'+r.name+'</td><td>'+r.unit+'</td><td>'+r.desc+'</td>';
     h += '<td><span class="tag '+c+'">'+ac+'</span></td>';
-    h += '<td>'+(r.group_id||'')+'</td><td>'+(r.suggestion||'')+'</td></tr>';
+    h += '<td>'+(r.group_id||'')+'</td><td>'+(r.suggestion||'')+'</td>';
+    if(hasOrders){
+      var kr = r.keep_or_remove || '', rs = r.replace_spuid || '';
+      var oc = r.order_count !== undefined && r.order_count !== '' ? r.order_count : '-';
+      var ocu = r.order_customers || '';
+      ocu = ocu.replace(/\n/g, '<br>');
+      h += '<td>'+kr+'</td><td>'+rs+'</td><td>'+oc+'</td><td style="font-size:11px">'+ocu+'</td>';
+    }
+    h += '</tr>';
   }
   $('tbA').innerHTML = h; $('twA').style.display = 'block';
 }
@@ -320,6 +343,7 @@ function resetA(){
   $('upA').style.display = 'block'; $('progA').style.display = 'none';
   $('infoA').classList.remove('ok'); $('infoA').textContent = '';
   $('statsA').style.display = 'none'; $('twA').style.display = 'none'; $('tbA').innerHTML = '';
+  $('upOrders').style.display = 'none';
   _log('模块A 已重置', '#ff0');
 }
 
@@ -327,6 +351,22 @@ $('btnResetA').onclick = function(){ resetA(); };
 $('btnExportA').onclick = function(){
   _log('模块A 导出清洗结果', '#0ff');
   window.open('/api/clean-export');
+};
+$('upOrders').onclick = function(){
+  _log('上传订单: 打开文件选择', '#0ff');
+  $('upOrders').querySelector('input').click();
+};
+$('upOrders').querySelector('input').onchange = function(){
+  _log('上传订单: 已选择文件: '+this.files[0].name, '#0ff');
+  if(!this.files[0]){ _log('上传订单: 无文件', '#f44'); return; }
+  var fd = new FormData(); fd.append('file', this.files[0]);
+  _log('上传订单: 发送请求...', '#0ff');
+  fetch('/api/upload-orders', {method:'POST', body:fd}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){
+      _log('订单: '+d.total_rows+'行, '+d.unique_spuids+'编码, 匹配'+d.matched_existing+'条', '#0f0');
+      fetch('/api/clean-results').then(function(r){return r.json()}).then(function(d){ renderTableA(d.results); });
+    } else { _log('订单错误: '+d.error, '#f44'); }
+  }).catch(function(e){ _log('上传订单: 请求失败: '+e, '#f44'); });
 };
 
 // ===== 模块B：新品查重 =====
