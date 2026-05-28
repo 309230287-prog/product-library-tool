@@ -213,6 +213,13 @@ body{font-family:'Microsoft YaHei',sans-serif;background:#f0f2f5}
   };
   window._log = log;
   log('日志系统就绪', '#ff0');
+  setTimeout(function(){
+    fetch('/api/api-status').then(function(r){return r.json()}).then(function(d){
+      if(d.connected)        log('API 已就绪: '+d.key_preview+' | 连接成功', '#0f0');
+      else if(d.has_key)     log('API 已配置但连接失败: '+d.error, '#f80');
+      else                   log('API 未配置，请先点右上角⚙设置填写 Key', '#ff0');
+    });
+  }, 500);
 })();
 </script>
 

@@ -19,6 +19,18 @@ from translator import SemanticTranslator, ProductRow, resolve_spec
 from matcher import load_index, check_one, IndexedRow
 import openpyxl
 
+SETTINGS_PATH = os.path.join(EXE_DIR, "_settings.json")
+
+def load_saved_settings():
+    import json
+    if os.path.exists(SETTINGS_PATH):
+        try:
+            with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
 app = Flask(__name__, template_folder=TEMPLATES)
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200MB
 translator = SemanticTranslator()
@@ -29,10 +41,31 @@ except FileNotFoundError:
 
 COLS = {'brand': 2, 'name': 3, 'spec': 4, 'category': 5, 'unit': 6, 'remark': 7}
 
+
+def detect_product_columns(headers):
+    """扫描商品库表头，返回 {field: col(1-based)}"""
+    field_map = {
+        'spuid': ['spuid'],
+        'name': ['spu名称', '商品名称'],
+        'unit': ['基本单位', '单位', 'spu基本单位'],
+        'desc': ['描述', 'spu描述', '规格'],
+        'category': ['一级分类名称', '分类名称'],
+    }
+    cols = {}
+    for c, h in enumerate(headers, 1):
+        v = str(h or '').strip().lower()
+        for field, keywords in field_map.items():
+            if field not in cols:
+                for kw in keywords:
+                    if kw in v:
+                        cols[field] = c
+                        break
+    return cols
+
 task_state = {
     "running": False, "paused": False, "done": 0, "total": 0,
     "results": [], "wb": None,
-    "api_key": "", "model": "deepseek-chat", "api_url": "https://api.deepseek.com/v1/chat/completions",
+    "api_key": load_saved_settings().get("api_key", ""), "model": load_saved_settings().get("model", "deepseek-chat"), "api_url": load_saved_settings().get("api_url", "https://api.deepseek.com/v1/chat/completions"),
     "clean_progress": {"done": 0, "total": 0, "running": False},
     "clean_results": [],
     "build_progress": {"done": 0, "total": 0, "running": False},
@@ -68,6 +101,26 @@ def home():
     return render_template('index.html')
 
 
+@app.route('/api/api-status')
+def api_status():
+    key = task_state['api_key']
+    if not key:
+        return jsonify({'has_key': False, 'connected': False})
+    try:
+        s = requests.Session()
+        s.trust_env = False
+        resp = s.post(task_state['api_url'],
+            headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'},
+            json={'model': task_state['model'], 'messages': [{'role': 'user', 'content': 'hi'}], 'max_tokens': 5},
+            timeout=10)
+        if resp.status_code == 200 and resp.json().get('choices'):
+            preview = key[:8] + '...' + key[-4:]
+            return jsonify({'has_key': True, 'connected': True, 'key_preview': preview})
+        return jsonify({'has_key': True, 'connected': False, 'error': f'状态码{resp.status_code}'})
+    except Exception as e:
+        return jsonify({'has_key': True, 'connected': False, 'error': str(e)[:80]})
+
+
 @app.route('/api/test-connection', methods=['POST'])
 def test_connection():
     print("[API] /api/test-connection")
@@ -100,11 +153,19 @@ def save_settings():
     task_state['api_key'] = data.get('api_key', task_state['api_key'])
     task_state['model'] = data.get('model', task_state['model'])
     task_state['api_url'] = data.get('api_url', task_state['api_url'])
+    import json
+    saved = True
+    try:
+        with open(SETTINGS_PATH, 'w', encoding='utf-8') as f:
+            json.dump({'api_key': task_state['api_key'], 'api_url': task_state['api_url'], 'model': task_state['model']}, f, ensure_ascii=False)
+    except Exception as e:
+        saved = False
+        print(f'[设置] 保存失败: {e}')
     import judge
     judge.API_KEY = task_state['api_key']
     if task_state['api_url'] != 'https://api.deepseek.com/v1':
         judge.API_URL = task_state['api_url']
-    return jsonify({'ok': True, 'has_key': bool(task_state['api_key'])})
+    return jsonify({'ok': True, 'has_key': bool(task_state['api_key']), 'saved': saved})
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -238,45 +299,61 @@ def export():
 
 
 def build_process(wb):
-    ws = wb['工作表1'] if '工作表1' in wb.sheetnames else wb.active
+    ws = wb["工作表1"] if "工作表1" in wb.sheetnames else wb.active
+    headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+    col = detect_product_columns(headers)
+    print(f"[建索引] 列检测: {col}")
+    c_spuid, c_name, c_unit = col.get("spuid", 1), col.get("name", 2), col.get("unit", 3)
+    c_desc, c_cat = col.get("desc", 4), col.get("category", 5)
     idx = {}
     total = 0
     for r in range(2, ws.max_row + 1):
-        name = str(ws.cell(r, 2).value or '').strip()
+        cat_val = str(ws.cell(r, c_cat).value or "").strip() if c_cat else ""
+        name = str(ws.cell(r, c_name).value or "").strip()
         if not name: continue
         total += 1
-        nm = translator.translate_name(name, str(ws.cell(r, 5).value or ''))
-        dm = translator.translate_desc(str(ws.cell(r, 4).value or ''), str(ws.cell(r, 3).value or ''))
+        nm = translator.translate_name(name, cat_val)
+        dm = translator.translate_desc(
+            str(ws.cell(r, c_desc).value or "").strip() if c_desc else "",
+            str(ws.cell(r, c_unit).value or "").strip() if c_unit else "")
         spec = resolve_spec(nm, dm, False)
-        row = IndexedRow(spuid=str(ws.cell(r, 1).value or ''), core=nm.core,
+        row = IndexedRow(spuid=str(ws.cell(r, c_spuid).value or ""), core=nm.core,
             brand=nm.brand, spec_core=spec.spec_core, has_processing=False,
-            unit=str(ws.cell(r, 3).value or ''), raw_name=str(ws.cell(r, 2).value or ''),
-            category=str(ws.cell(r, 5).value or ''), has_chaoma=nm.has_chaoma,
+            unit=str(ws.cell(r, c_unit).value or "").strip() if c_unit else "",
+            raw_name=str(ws.cell(r, c_name).value or ""),
+            category=cat_val, has_chaoma=nm.has_chaoma,
             has_status=nm.has_status, hit_count=0)
         idx.setdefault(nm.core, []).append(row)
-        task_state['build_progress']['done'] = total
+        task_state["build_progress"]["done"] = total
         if total % 200 == 0:
             print(f"[建索引] {total}")
-    task_state['index'] = idx
-    task_state['build_progress']['total'] = total
-    task_state['build_progress']['running'] = False
+    task_state["index"] = idx
+    task_state["build_progress"]["total"] = total
+    task_state["build_progress"]["running"] = False
     print(f"[建索引] 完成 {total} 条, {len(idx)} 个core")
-
-
 def clean_process(wb):
     from rules import RuleEngine
-    ws = wb['工作表1'] if '工作表1' in wb.sheetnames else wb.active
+    ws = wb["工作表1"] if "工作表1" in wb.sheetnames else wb.active
+    headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
+    col = detect_product_columns(headers)
+    print(f"[清洗] 列检测: {col}")
+    c_spuid, c_name = col.get("spuid", 1), col.get("name", 2)
+    c_unit, c_desc = col.get("unit", 3), col.get("desc", 4)
+    c_cat = col.get("category", 5)
     rows = []
     total = 0
     for r in range(2, ws.max_row + 1):
-        name = str(ws.cell(r, 2).value or '').strip()
+        cat_val = str(ws.cell(r, c_cat).value or "").strip() if c_cat else ""
+        name = str(ws.cell(r, c_name).value or "").strip()
         if not name: continue
         total += 1
-        nm = translator.translate_name(name, str(ws.cell(r, 5).value or ''))
-        dm = translator.translate_desc(str(ws.cell(r, 4).value or ''), str(ws.cell(r, 3).value or ''))
-        rows.append(ProductRow(spuid=str(ws.cell(r, 1).value or ''), name_meaning=nm,
-            unit=str(ws.cell(r, 3).value or ''), desc_meaning=dm,
-            category=str(ws.cell(r, 5).value or '')))
+        nm = translator.translate_name(name, cat_val)
+        dm = translator.translate_desc(
+            str(ws.cell(r, c_desc).value or "").strip() if c_desc else "",
+            str(ws.cell(r, c_unit).value or "").strip() if c_unit else "")
+        rows.append(ProductRow(spuid=str(ws.cell(r, c_spuid).value or ""), name_meaning=nm,
+            unit=str(ws.cell(r, c_unit).value or "").strip() if c_unit else "",
+            desc_meaning=dm, category=cat_val))
     task_state['clean_progress']['total'] = total
     engine = RuleEngine(rows, translator)
     engine.run_all()
@@ -402,17 +479,20 @@ def clean_export():
             r['order_count'] = data.get('count', '') if data.get('count', 0) > 0 else ''
             r['order_customers'] = '\n'.join(data.get('customers', []))
 
-    sheet1 = [r for r in results if r['anomaly_class'] in ('完全重复', '异名同物')]
-    sheet2 = [r for r in results if r['anomaly_class'] == '正常' and r.get('order_count', '') != '']
-    sheet3 = [r for r in results if r['anomaly_class'] == '抄码名重复']
+    sheet_data = [
+        ('重复编码待处理', [r for r in results if r['anomaly_class'] in ('完全重复', '异名同物')]),
+        ('正常编码',       [r for r in results if r['anomaly_class'] == '正常']),
+        ('抄码名待处理',   [r for r in results if r['anomaly_class'] == '抄码名重复']),
+        ('数据缺失',       [r for r in results if r['anomaly_class'] == '缺省值']),
+    ]
 
     wb = openpyxl.Workbook()
     headers = ['SPUID', 'SPU名称（可修改）', 'SPU基本单位', 'SPU描述（可修改）',
                '一级分类名称', '组号', '组说明', '建议', '异常分类',
                '是否下架/保留', '替代编码', '订单命中次数', '订单命中客户']
 
-    for sheet_name, rows in [('Sheet1', sheet1), ('Sheet2', sheet2), ('Sheet3', sheet3)]:
-        if sheet_name == 'Sheet1':
+    for i, (sheet_name, rows) in enumerate(sheet_data):
+        if i == 0:
             ws = wb.active
             ws.title = sheet_name
         else:
